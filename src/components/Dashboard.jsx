@@ -10,6 +10,7 @@ export default function Dashboard({ session }) {
   const [transactions, setTransactions] = useState([]);
   const [holdings, setHoldings] = useState([]);
   const [rates, setRates] = useState({ USD: 35.0, EUR: 38.0, GA: 3200.0 }); // Fallback values
+  const [loadingRates, setLoadingRates] = useState(true);
   const [loading, setLoading] = useState(true);
   
   // Form States for Transactions
@@ -75,6 +76,7 @@ export default function Dashboard({ session }) {
           EUR: parseTRValue(data.EUR.Selling),
           GA: parseTRValue(data['gram-altin'].Selling)
         });
+        setLoadingRates(false);
       }
     } catch (error) {
       console.error('Kurlar alınamadı:', error.message);
@@ -315,10 +317,16 @@ export default function Dashboard({ session }) {
           </h1>
         </motion.div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className="rates-bar" style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.05)', padding: '0.5rem 1rem', borderRadius: '20px', border: '1px solid var(--border-color)' }}>
-            <span>🇺🇸 USD: ₺{rates.USD.toFixed(2)}</span>
-            <span>🇪🇺 EUR: ₺{rates.EUR.toFixed(2)}</span>
-            <span>🟡 ALTIN: ₺{rates.GA.toFixed(2)}</span>
+          <div className="rates-bar" style={{ display: 'flex', gap: '0.8rem', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.05)', padding: '0.5rem 1rem', borderRadius: '20px', border: '1px solid var(--border-color)', minHeight: '34px', alignItems: 'center' }}>
+            {loadingRates ? (
+              <span style={{ opacity: 0.5 }}>📊 Kurlar yükleniyor...</span>
+            ) : (
+              <>
+                <span style={{ minWidth: '85px' }}>🇺🇸 USD: ₺{rates.USD.toFixed(2)}</span>
+                <span style={{ minWidth: '85px' }}>🇪🇺 EUR: ₺{rates.EUR.toFixed(2)}</span>
+                <span style={{ minWidth: '85px' }}>🟡 ALTİN: ₺{rates.GA.toFixed(2)}</span>
+              </>
+            )}
           </div>
           <span style={{ color: 'var(--text-secondary)' }}>{user?.email}</span>
           <button className="btn btn-ghost" onClick={resetData} style={{ color: '#f87171' }}>
