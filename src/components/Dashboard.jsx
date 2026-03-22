@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Pie } from 'react-chartjs-2';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { Pie, Bar } from 'react-chartjs-2';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title } from 'chart.js';
 import { motion, AnimatePresence } from 'framer-motion';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
-ChartJS.register(ArcElement, Tooltip, Legend);
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title);
 
 export default function Dashboard({ session }) {
   const [transactions, setTransactions] = useState([]);
@@ -26,6 +28,7 @@ export default function Dashboard({ session }) {
   const [holdingUnit, setHoldingUnit] = useState('TRY');
   const [holdingType, setHoldingType] = useState('investment');
   const [activeTab, setActiveTab] = useState('transactions');
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   const user = session?.user;
 
@@ -260,6 +263,83 @@ export default function Dashboard({ session }) {
   const monthlyExpense = monthlyTransactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + Number(curr.amount), 0);
   const monthlyProgress = monthlyIncome > 0 ? (monthlyExpense / monthlyIncome) * 100 : 0;
 
+  // Trend Chart Data (Last 6 Months Income vs Expense)
+  const getLast6Months = () => {
+    const months = [];
+    const d = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const monthDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
+      months.push({
+        label: monthDate.toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' }),
+        month: monthDate.getMonth(),
+        year: monthDate.getFullYear()
+      });
+    }
+    return months;
+  };
+
+  const trendMonths = getLast6Months();
+  const trendIncomeData = trendMonths.map(m => {
+    return incomes.filter(t => {
+      const d = new Date(t.date);
+      return d.getMonth() === m.month && d.getFullYear() === m.year;
+    }).reduce((sum, t) => sum + Number(t.amount), 0);
+  });
+  
+  const trendExpenseData = trendMonths.map(m => {
+    return expenses.filter(t => {
+      const d = new Date(t.date);
+      return d.getMonth() === m.month && d.getFullYear() === m.year;
+    }).reduce((sum, t) => sum + Number(t.amount), 0);
+  });
+
+  const trendChartData = {
+    labels: trendMonths.map(m => m.label),
+    datasets: [
+      {
+        label: 'Gelir',
+        data: trendIncomeData,
+        backgroundColor: 'rgba(16, 185, 129, 0.7)',
+        borderColor: '#10b981',
+        borderWidth: 1,
+        borderRadius: 4,
+      },
+      {
+        label: 'Gider',
+        data: trendExpenseData,
+        backgroundColor: 'rgba(239, 68, 68, 0.7)',
+        borderColor: '#ef4444',
+        borderWidth: 1,
+        borderRadius: 4,
+      }
+    ],
+  };
+
+  const trendChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top',
+        labels: { color: isDarkMode ? '#c9d1d9' : '#475569', font: { family: 'Outfit', size: 12 } }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+      }
+    },
+    scales: {
+      y: {
+        ticks: { color: isDarkMode ? '#8b949e' : '#64748b', callback: (value) => '₺' + value },
+        grid: { color: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
+      },
+      x: {
+        ticks: { color: isDarkMode ? '#8b949e' : '#64748b' },
+        grid: { display: false }
+      }
+    }
+  };
+
   // Chart Data preparation
   const expenseCategories = {};
   expenses.forEach(t => {
@@ -287,8 +367,69 @@ export default function Dashboard({ session }) {
     maintainAspectRatio: false,
   };
 
+  const exportData = () => {
+    const doc = new jsPDF();
+    
+    // Turkish Character Replacer function to avoid missing characters in default font
+    const trMap = { 'ç':'c', 'ğ':'g', 'ı':'i', 'ö':'o', 'ş':'s', 'ü':'u', 'Ç':'C', 'Ğ':'G', 'İ':'I', 'Ö':'O', 'Ş':'S', 'Ü':'U' };
+    const safeStr = (str) => String(str).replace(/[çğıöşüÇĞİÖŞÜ]/g, m => trMap[m] || m);
+
+    // Title & Header
+    doc.setFontSize(22);
+    doc.setTextColor(44, 62, 80);
+    doc.text('Akcefy Raporu', 14, 22);
+    
+    doc.setFontSize(11);
+    doc.setTextColor(127, 140, 141);
+    doc.text(`Tarih: ${new Date().toLocaleDateString('tr-TR')}`, 14, 30);
+    doc.text(`Net Bakiye: ${balance.toFixed(2)} TL | Tahmini Net Varlik: ${netHoldings.toFixed(2)} TL`, 14, 36);
+
+    // 1. Transactions Table
+    const tableTxData = transactions.map(t => [
+      new Date(t.date).toLocaleDateString('tr-TR'),
+      t.type === 'income' ? 'Gelir' : 'Gider',
+      safeStr(t.category),
+      `${Number(t.amount).toFixed(2)} TL`
+    ]);
+
+    autoTable(doc, {
+      startY: 42,
+      head: [['Tarih', 'Tip', 'Kategori', 'Tutar']],
+      body: tableTxData,
+      theme: 'striped',
+      headStyles: { fillColor: [59, 130, 246] }, // Blue
+      margin: { top: 10 },
+      styles: { font: 'helvetica' }
+    });
+
+    // 2. Holdings Table
+    const tableHoldData = holdings.map(h => [
+      safeStr(h.name),
+      h.type === 'investment' ? 'Yatirim' : 'Borc',
+      `${h.amount} ${h.unit}`,
+      `${calculateValue(h.amount, h.unit).toFixed(2)} TL`
+    ]);
+
+    if (tableHoldData.length > 0) {
+      doc.setFontSize(14);
+      doc.setTextColor(44, 62, 80);
+      doc.text('Mevcut Varlik ve Borclar', 14, doc.lastAutoTable.finalY + 15);
+      
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 20,
+        head: [['Isim', 'Tip', 'Miktar', 'Tahmini Deger (TRY)']],
+        body: tableHoldData,
+        theme: 'striped',
+        headStyles: { fillColor: [16, 185, 129] }, // Green
+        styles: { font: 'helvetica' }
+      });
+    }
+
+    doc.save(`akcefy_rapor_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
   return (
-    <div className="light-mode">
+    <div className={isDarkMode ? "" : "light-mode"}>
       <motion.div 
         initial={{ opacity: 0 }} 
         animate={{ opacity: 1 }} 
@@ -312,12 +453,12 @@ export default function Dashboard({ session }) {
               boxShadow: '0 0 15px rgba(59, 130, 246, 0.3)' 
             }} 
           />
-          <h1 style={{ margin: 0, fontSize: '1.8rem', fontWeight: '800', color: '#ffffff', letterSpacing: '-0.5px' }}>
+          <h1 style={{ margin: 0, fontSize: '1.8rem', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>
             Akcefy
           </h1>
         </motion.div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className="rates-bar" style={{ display: 'flex', gap: '0.8rem', fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.05)', padding: '0.5rem 1rem', borderRadius: '20px', border: '1px solid var(--border-color)', minHeight: '34px', alignItems: 'center' }}>
+          <div className="rates-bar" style={{ display: 'flex', gap: '0.8rem', fontSize: '0.75rem', backgroundColor: 'var(--bg-card)', padding: '0.5rem 1rem', borderRadius: '20px', border: '1px solid var(--border-color)', minHeight: '34px', alignItems: 'center' }}>
             {loadingRates ? (
               <span style={{ opacity: 0.5 }}>📊 Kurlar yükleniyor...</span>
             ) : (
@@ -328,6 +469,12 @@ export default function Dashboard({ session }) {
               </>
             )}
           </div>
+          <button className="btn btn-ghost" onClick={() => setIsDarkMode(!isDarkMode)} style={{ padding: '0.4rem 0.8rem', fontSize: '1.2rem' }} title="Tema Değiştir">
+            {isDarkMode ? '🌞' : '🌙'}
+          </button>
+          <button className="btn btn-ghost" onClick={exportData} style={{ padding: '0.4rem 0.8rem', color: 'var(--income-color)' }} title="Verileri İndir (CSV)">
+            📥 Dışa Aktar
+          </button>
           <span style={{ color: 'var(--text-secondary)' }}>{user?.email}</span>
           <button className="btn btn-ghost" onClick={resetData} style={{ color: '#f87171' }}>
             ♻️ Sıfırla
@@ -402,9 +549,10 @@ export default function Dashboard({ session }) {
       <div className="tabs-container">
         <div className={`tab ${activeTab === 'transactions' ? 'active' : ''}`} onClick={() => setActiveTab('transactions')}>Gelir & Gider</div>
         <div className={`tab ${activeTab === 'holdings' ? 'active' : ''}`} onClick={() => setActiveTab('holdings')}>Varlıklar & Borçlar</div>
+        <div className={`tab ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => setActiveTab('trends')}>Harcama Grafiği</div>
       </div>
 
-      {activeTab === 'transactions' ? (
+      {activeTab === 'transactions' && (
         <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem' }}>
           {/* Left Column: Form & Chart */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -502,7 +650,9 @@ export default function Dashboard({ session }) {
             )}
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'holdings' && (
         <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem' }}>
           {/* Left Column: Holdings Form */}
           <div className="glass-card">
@@ -558,7 +708,25 @@ export default function Dashboard({ session }) {
           </div>
         </div>
       )}
+
+      {activeTab === 'trends' && (
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass-card" 
+        >
+          <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
+            <h3 style={{ color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>📊 Harcama Grafiği (Son 6 Ay)</h3>
+          </div>
+          <div style={{ height: '400px', width: '100%' }}>
+            <Bar data={trendChartData} options={trendChartOptions} />
+          </div>
+        </motion.div>
+      )}
       </motion.div>
+      <div style={{ textAlign: 'center', padding: '2rem 1rem 1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', opacity: 0.7, fontFamily: 'Outfit, sans-serif' }}>
+        by elber
+      </div>
     </div>
   );
 }

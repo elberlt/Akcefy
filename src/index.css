@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
 
 @theme {
   --background: 0 0% 100%;
@@ -52,17 +52,17 @@
 }
 
 .light-mode {
-  --bg-color: #0f172a;
+  --bg-color: #f8fafc;
   --bg-card: #ffffff;
   --bg-card-hover: #f1f5f9;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --accent-color: #3b82f6;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --accent-color: #2563eb;
   --income-color: #10b981;
   --income-bg: rgba(16, 185, 129, 0.1);
-  --expense-color: #f43f5e;
-  --expense-bg: rgba(244, 63, 94, 0.1);
-  --border-color: rgba(255, 255, 255, 0.1);
+  --expense-color: #ef4444;
+  --expense-bg: rgba(239, 68, 68, 0.1);
+  --border-color: #e2e8f0;
   background-color: var(--bg-color);
   color: var(--text-primary);
   min-height: 100vh;
