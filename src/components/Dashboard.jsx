@@ -27,6 +27,8 @@ export default function Dashboard({ session }) {
   const [holdingAmount, setHoldingAmount] = useState('');
   const [holdingUnit, setHoldingUnit] = useState('TRY');
   const [holdingType, setHoldingType] = useState('investment');
+  const [isCurrentPrice, setIsCurrentPrice] = useState(true);
+  const [purchasePrice, setPurchasePrice] = useState('');
   const [activeTab, setActiveTab] = useState('transactions');
   const [isDarkMode, setIsDarkMode] = useState(false);
 
@@ -174,6 +176,22 @@ export default function Dashboard({ session }) {
     e.preventDefault();
     if (!holdingName || !holdingAmount) return;
 
+    let finalPurchasePrice = 0;
+    
+    // Yalnızca yatırım ise alış fiyatı mantığını kullan
+    if (holdingType === 'investment') {
+      if (isCurrentPrice) {
+        // Şu anki kur alınıyor
+        if (holdingUnit === 'USD') finalPurchasePrice = rates.USD;
+        else if (holdingUnit === 'EUR') finalPurchasePrice = rates.EUR;
+        else if (holdingUnit === 'GA') finalPurchasePrice = rates.GA;
+        else finalPurchasePrice = 1; // TRY için 1
+      } else {
+        // Kullanıcının girdiği fiyat
+        finalPurchasePrice = purchasePrice ? parseFloat(purchasePrice) : 0;
+      }
+    }
+
     try {
       const newHolding = {
         user_id: user.id,
@@ -181,6 +199,7 @@ export default function Dashboard({ session }) {
         amount: parseFloat(holdingAmount),
         unit: holdingUnit,
         type: holdingType,
+        purchase_price: finalPurchasePrice
       };
 
       const { error } = await supabase.from('holdings').insert([newHolding]);
@@ -195,6 +214,8 @@ export default function Dashboard({ session }) {
 
       setHoldingName('');
       setHoldingAmount('');
+      setPurchasePrice('');
+      setIsCurrentPrice(true);
       fetchData();
     } catch (error) {
       console.error('Varlık eklenirken hata oluştu:', error.message);
@@ -413,14 +434,46 @@ export default function Dashboard({ session }) {
     if (tableHoldData.length > 0) {
       doc.setFontSize(14);
       doc.setTextColor(44, 62, 80);
-      doc.text('Mevcut Varlik ve Borclar', 14, doc.lastAutoTable.finalY + 15);
+      doc.text('Mevcut Varlık ve Borçlar', 14, doc.lastAutoTable.finalY + 15);
       
       autoTable(doc, {
         startY: doc.lastAutoTable.finalY + 20,
-        head: [['Isim', 'Tip', 'Miktar', 'Tahmini Deger (TRY)']],
+        head: [['İsim', 'Tip', 'Miktar', 'Tahmini Değer (TRY)']],
         body: tableHoldData,
         theme: 'striped',
         headStyles: { fillColor: [16, 185, 129] }, // Green
+        styles: { font: 'helvetica' }
+      });
+    }
+
+    // 3. Investment Performance Table
+    const investmentHoldings = holdings.filter(h => h.type === 'investment' && h.unit !== 'TRY' && h.purchase_price > 0);
+    if (investmentHoldings.length > 0) {
+      const tablePerfData = investmentHoldings.map(h => {
+        const currentPrice = h.unit === 'USD' ? rates.USD : h.unit === 'EUR' ? rates.EUR : h.unit === 'GA' ? rates.GA : 1;
+        const totalCost = h.purchase_price * h.amount;
+        const currentValue = currentPrice * h.amount;
+        const profitLoss = currentValue - totalCost;
+        const profitPercentage = ((profitLoss / totalCost) * 100).toFixed(2);
+        
+        return [
+          safeStr(h.name),
+          `${h.purchase_price.toFixed(2)} TL`,
+          `${currentPrice.toFixed(2)} TL`,
+          `${profitLoss > 0 ? '+' : ''}${profitLoss.toFixed(2)} TL (%${profitPercentage})`
+        ];
+      });
+
+      doc.setFontSize(14);
+      doc.setTextColor(44, 62, 80);
+      doc.text('Yatırım Performansı', 14, doc.lastAutoTable.finalY + 15);
+      
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 20,
+        head: [['Yatırım', 'Maliyet Kuru', 'Güncel Kur', 'Kâr/Zarar (TRY)']],
+        body: tablePerfData,
+        theme: 'striped',
+        headStyles: { fillColor: [245, 158, 11] }, // Amber/Orange
         styles: { font: 'helvetica' }
       });
     }
@@ -550,6 +603,7 @@ export default function Dashboard({ session }) {
         <div className={`tab ${activeTab === 'transactions' ? 'active' : ''}`} onClick={() => setActiveTab('transactions')}>Gelir & Gider</div>
         <div className={`tab ${activeTab === 'holdings' ? 'active' : ''}`} onClick={() => setActiveTab('holdings')}>Varlıklar & Borçlar</div>
         <div className={`tab ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => setActiveTab('trends')}>Harcama Grafiği</div>
+        <div className={`tab ${activeTab === 'performance' ? 'active' : ''}`} onClick={() => setActiveTab('performance')}>Yatırım Performansı</div>
       </div>
 
       {activeTab === 'transactions' && (
@@ -678,27 +732,98 @@ export default function Dashboard({ session }) {
                   </select>
                 </div>
               </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Ekle</button>
+
+              {holdingType === 'investment' && holdingUnit !== 'TRY' && (
+                <div className="form-group" style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <label className="form-label" style={{ marginBottom: '0.8rem' }}>Bu yatırımı şu anki fiyattan mı aldınız?</label>
+                  <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                      <input type="radio" checked={isCurrentPrice} onChange={() => setIsCurrentPrice(true)} />
+                      <span>Evet (Güncel Kur)</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                      <input type="radio" checked={!isCurrentPrice} onChange={() => setIsCurrentPrice(false)} />
+                      <span>Hayır (Eski Yatırım)</span>
+                    </label>
+                  </div>
+                  
+                  {!isCurrentPrice && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <label className="form-label">Birim Alış Fiyatı (₺)</label>
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        className="form-input" 
+                        value={purchasePrice} 
+                        onChange={e => setPurchasePrice(e.target.value)} 
+                        placeholder="Örn: 3100" 
+                        required={!isCurrentPrice} 
+                      />
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                        1 {holdingUnit} için ödediğiniz TL tutarını girin.
+                      </p>
+                    </motion.div>
+                  )}
+                </div>
+              )}
+
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>Ekle</button>
             </form>
           </div>
           {/* Right Column: Holdings List */}
-          <div className="glass-card">
+          <div className="glass-card" style={{ overflowY: 'auto', maxHeight: '800px' }}>
             <h3 style={{ marginBottom: '1.5rem' }}>Mevcut Varlık ve Borçlar</h3>
             {holdings.length === 0 ? <p style={{ textAlign: 'center' }}>Kayıtlı varlık veya borç bulunmuyor.</p> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {holdings.map(h => {
                   const tryValue = calculateValue(h.amount, h.unit);
+                  const totalCost = (h.purchase_price || 0) * h.amount;
+                  const profitLoss = tryValue - totalCost;
+                  const profitPercentage = totalCost > 0 ? (profitLoss / totalCost) * 100 : 0;
+                  const isProfit = profitLoss >= 0;
+
                   return (
-                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '12px', borderLeft: `4px solid ${h.type === 'investment' ? '#4ade80' : '#f87171'}` }}>
-                      <div>
-                        <h4 style={{ margin: 0 }}>{h.name} <span className="unit-tag">{h.amount} {h.unit}</span></h4>
-                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Tahmini Değer: ₺{tryValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</span>
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '1.2rem', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '12px', borderLeft: `4px solid ${h.type === 'investment' ? '#4ade80' : '#f87171'}`, position: 'relative' }}>
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {h.name} 
+                          <span className="unit-tag" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', background: 'var(--bg-default)', borderRadius: '12px' }}>
+                            {h.amount} {h.unit}
+                          </span>
+                        </h4>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>
+                            Güncel Değer: <strong style={{ color: 'var(--text-primary)' }}>₺{tryValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</strong>
+                          </span>
+                          
+                          {h.type === 'investment' && h.purchase_price > 0 && h.unit !== 'TRY' && (
+                            <span style={{ color: 'var(--text-secondary)' }}>
+                              Maliyet: ₺{totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} 
+                              <span style={{ fontSize: '0.75rem', opacity: 0.7 }}> (Birim: ₺{h.purchase_price})</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <span className={h.type === 'investment' ? 'text-investment' : 'text-debt'} style={{ fontWeight: 600 }}>
-                          {h.type === 'investment' ? '+' : '-'}₺{tryValue.toFixed(2)}
+
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', gap: '0.5rem' }}>
+                        <span className={h.type === 'investment' ? 'text-investment' : 'text-debt'} style={{ fontWeight: 700, fontSize: '1.1rem' }}>
+                          {h.type === 'investment' ? '+' : '-'}₺{tryValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
-                        <button className="btn btn-ghost" onClick={() => deleteHolding(h.id)} style={{ padding: '0.2rem 0.5rem' }}>❌</button>
+
+                        {h.type === 'investment' && h.purchase_price > 0 && h.unit !== 'TRY' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem', color: isProfit ? 'var(--income-color)' : 'var(--expense-color)', background: isProfit ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', padding: '0.2rem 0.6rem', borderRadius: '12px' }}>
+                            <span>{isProfit ? '📈' : '📉'}</span>
+                            <span style={{ fontWeight: 600 }}>
+                              {isProfit ? '+' : ''}₺{Math.abs(profitLoss).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <span style={{ fontSize: '0.75rem', opacity: 0.9 }}>
+                              ({isProfit ? '+' : ''}%{Math.abs(profitPercentage).toFixed(2)})
+                            </span>
+                          </div>
+                        )}
+
+                        <button className="btn btn-ghost" onClick={() => deleteHolding(h.id)} style={{ padding: '0.2rem', fontSize: '0.8rem', position: 'absolute', top: '0.5rem', right: '0.5rem', opacity: 0.5 }}>❌</button>
                       </div>
                     </div>
                   );
@@ -710,18 +835,97 @@ export default function Dashboard({ session }) {
       )}
 
       {activeTab === 'trends' && (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-card" 
-        >
-          <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
-            <h3 style={{ color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>📊 Harcama Grafiği (Son 6 Ay)</h3>
-          </div>
-          <div style={{ height: '400px', width: '100%' }}>
-            <Bar data={trendChartData} options={trendChartOptions} />
-          </div>
-        </motion.div>
+        <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(350px, 1fr)', gap: '2rem' }}>
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-card" 
+          >
+            <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
+              <h3 style={{ color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>📊 Harcama Grafiği (Son 6 Ay)</h3>
+            </div>
+            <div style={{ height: '400px', width: '100%' }}>
+              <Bar data={trendChartData} options={trendChartOptions} />
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {activeTab === 'performance' && (
+        <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(350px, 1fr)', gap: '2rem' }}>
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-card"
+          >
+            <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
+              <h3 style={{ color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>📈 Yatırım Performansı Detayları</h3>
+            </div>
+            
+            <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem', display: 'flex', gap: '0.8rem', alignItems: 'flex-start' }}>
+              <span style={{ fontSize: '1.5rem' }}>💡</span>
+              <div>
+                <h4 style={{ margin: '0 0 0.3rem 0', color: 'var(--text-primary)', fontSize: '0.95rem' }}>Eski Yatırımlarınızı da Ekleyebilirsiniz!</h4>
+                <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                  Varlıklar sekmesinden döviz veya altın eklerken <strong>"Hayır (Eski Yatırım)"</strong> seçeneğini işaretleyerek, geçmişte aldığınız yatırımların maliyet fiyatını girebilirsiniz. Böylece eski yatırımlarınızın da bugün ne kadar kâr ettirdiğini anlık takip edebilirsiniz.
+                </p>
+              </div>
+            </div>
+
+            {holdings.filter(h => h.type === 'investment' && h.unit !== 'TRY' && h.purchase_price > 0).length === 0 ? (
+              <p style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem 0' }}>
+                Henüz kâr/zarar takibi yapılan bir yatırımınız bulunmuyor.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
+                {holdings
+                  .filter(h => h.type === 'investment' && h.unit !== 'TRY' && h.purchase_price > 0)
+                  .map(h => {
+                    const currentPrice = h.unit === 'USD' ? rates.USD : h.unit === 'EUR' ? rates.EUR : h.unit === 'GA' ? rates.GA : 1;
+                    const currentValue = currentPrice * h.amount;
+                    const totalCost = h.purchase_price * h.amount;
+                    const profitLoss = currentValue - totalCost;
+                    const profitPercentage = (profitLoss / totalCost) * 100;
+                    const isProfit = profitLoss >= 0;
+
+                    return (
+                      <div key={h.id} style={{ padding: '1.5rem', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '1rem', boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
+                        <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.8rem' }}>
+                          <h4 style={{ margin: 0, fontSize: '1.1rem' }}>{h.name} <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 'normal' }}>({h.amount} {h.unit})</span></h4>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '1.2rem', color: isProfit ? 'var(--income-color)' : 'var(--expense-color)', fontWeight: 800 }}>
+                            {isProfit ? '+' : ''}₺{Math.abs(profitLoss).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: '1rem', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                            <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Maliyet Kur</div>
+                            <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>₺{h.purchase_price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</div>
+                            <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>Toplam: ₺{totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</div>
+                          </div>
+                          
+                          <div style={{ width: '1px', height: '100%', backgroundColor: 'var(--border-color)' }}></div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                            <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Güncel Kur</div>
+                            <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>₺{currentPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</div>
+                            <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>Toplam: ₺{currentValue.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</div>
+                          </div>
+                        </div>
+
+                        <div style={{ backgroundColor: isProfit ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', padding: '0.8rem', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                          <span style={{ fontSize: '1.2rem' }}>{isProfit ? '🚀' : '📉'}</span>
+                          <span style={{ color: isProfit ? 'var(--income-color)' : 'var(--expense-color)', fontWeight: 700, fontSize: '1rem' }}>
+                            {isProfit ? 'Kâr:' : 'Zarar:'} {isProfit ? '+' : ''}%{Math.abs(profitPercentage).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </motion.div>
+        </div>
       )}
       </motion.div>
       <div style={{ textAlign: 'center', padding: '2rem 1rem 1rem', color: 'var(--text-secondary)', fontSize: '0.8rem', opacity: 0.7, fontFamily: 'Outfit, sans-serif' }}>
